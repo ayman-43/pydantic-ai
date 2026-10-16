@@ -17244,6 +17244,43 @@ async def test_foreground_stream_pending_status_is_incomplete(allow_model_reques
     assert (model_response.provider_details or {}).get('background') is None
 
 
+async def test_agent_stream_without_terminal_event_is_incomplete(allow_model_requests: None):
+    """An agent run keeps the `'incomplete'` state of a Responses stream that ended before its terminal event.
+
+    The agent streams through the continuation wrapper, which must not stamp the finished segment `'complete'`.
+    """
+    response = response_message([])
+    response.status = 'in_progress'
+    mock_client = MockOpenAIResponses.create_mock_stream(
+        [
+            resp.ResponseCreatedEvent(response=response, sequence_number=0, type='response.created'),
+            resp.ResponseOutputItemAddedEvent(
+                item=resp.ResponseOutputMessage(
+                    id='msg_1', content=[], role='assistant', status='in_progress', type='message'
+                ),
+                output_index=0,
+                sequence_number=1,
+                type='response.output_item.added',
+            ),
+            resp.ResponseTextDeltaEvent(
+                content_index=0,
+                delta='Hello, th',
+                item_id='msg_1',
+                logprobs=[],
+                output_index=0,
+                sequence_number=2,
+                type='response.output_text.delta',
+            ),
+        ]
+    )
+    agent = Agent(OpenAIResponsesModel('gpt-4o', provider=OpenAIProvider(openai_client=mock_client)))
+
+    async with agent.run_stream('Say hello.') as result:
+        assert await result.get_output() == 'Hello, th'
+
+    assert result.response.state == 'incomplete'
+
+
 async def test_resumed_stream_without_terminal_event_stays_suspended(allow_model_requests: None):
     """A resumed background stream that EOFs again without a terminal event stays 'suspended', not 'complete'.
 

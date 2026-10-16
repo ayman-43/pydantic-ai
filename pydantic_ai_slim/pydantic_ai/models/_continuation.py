@@ -593,7 +593,7 @@ class _ContinuationStreamedResponse(StreamedResponse):
 
         The composite normally resolves the whole `suspended → … → complete` chain, so mid-run it's
         `'complete'` once the loop exits, `'interrupted'` if cancelled, and `'incomplete'` while a
-        segment is still in flight. The one case it *does* surface `'suspended'` is a **detach**: the
+        segment is still in flight or if the last one ended before the provider's terminal event. The one case it *does* surface `'suspended'` is a **detach**: the
         consumer stopped iterating and the stream was torn down via `aclose()` — not `cancel()` — while
         the current/last segment is itself a still-pending suspended job. The server-side job survives
         (detach doesn't cancel it), so recording `'suspended'` makes the run resumable later, matching
@@ -603,7 +603,9 @@ class _ContinuationStreamedResponse(StreamedResponse):
         snapshot = self._snapshot()
 
         state: ModelResponseState
-        if self._finished:
+        if self._finished and not (snapshot is not None and snapshot.state == 'incomplete'):
+            # As in `StreamedResponse.get()`, a finished loop is only `'complete'` if the last segment didn't
+            # report itself `'incomplete'` (e.g. a stream that ended before the provider's terminal event).
             state = 'complete'
         elif self._cancelled:
             # A real `cancel()` tore down the server-side job too, so this is not resumable.
