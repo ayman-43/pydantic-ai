@@ -5624,6 +5624,61 @@ async def test_anthropic_refusal_stop_details_streaming(
 
 
 @pytest.mark.parametrize(
+    'terminal_events,expected_state',
+    [
+        pytest.param([], 'incomplete', id='cut-off'),
+        pytest.param([BetaRawMessageStopEvent(type='message_stop')], 'complete', id='message-stop-only'),
+        pytest.param(
+            [
+                BetaRawMessageDeltaEvent(
+                    type='message_delta',
+                    delta=Delta(stop_reason='end_turn'),
+                    usage=BetaMessageDeltaUsage(input_tokens=9, output_tokens=3),
+                ),
+                BetaRawMessageStopEvent(type='message_stop'),
+            ],
+            'complete',
+            id='finished',
+        ),
+    ],
+)
+async def test_anthropic_stream_state_without_terminal_event(
+    allow_model_requests: None,
+    terminal_events: list[MockRawMessageStreamEvent],
+    expected_state: str,
+):
+    """A stream that ends before `message_delta`/`message_stop` is `'incomplete'`, not `'complete'`."""
+    stream: list[MockRawMessageStreamEvent] = [
+        BetaRawMessageStartEvent(
+            type='message_start',
+            message=BetaMessage(
+                id='msg_cut_off',
+                content=[],
+                model='claude-sonnet-5-5',
+                role='assistant',
+                stop_reason=None,
+                type='message',
+                usage=BetaUsage(input_tokens=9, output_tokens=1),
+            ),
+        ),
+        BetaRawContentBlockStartEvent(
+            type='content_block_start', index=0, content_block=BetaTextBlock(type='text', text='')
+        ),
+        BetaRawContentBlockDeltaEvent(
+            type='content_block_delta', index=0, delta=BetaTextDelta(type='text_delta', text='Hello, th')
+        ),
+        *terminal_events,
+    ]
+    mock_client = MockAnthropic.create_stream_mock(stream)
+    agent = Agent(AnthropicModel('claude-sonnet-5-5', provider=AnthropicProvider(anthropic_client=mock_client)))
+
+    async with agent.run_stream('Say hello.') as result:
+        assert await result.get_output() == 'Hello, th'
+
+    assert result.response.state == expected_state
+
+
+@pytest.mark.parametrize(
     'thinking_value,expected_thinking,expected_effort',
     [
         pytest.param(True, {'type': 'adaptive'}, None, id='true-adaptive'),

@@ -3501,6 +3501,9 @@ class AnthropicStreamedResponse(StreamedResponse):
                         continue
                     self._usage = _map_usage(event, self._provider_name, self._provider_url, self._model_name)
                     self.provider_response_id = event.message.id
+                    # Until `message_delta` reports a stop reason (or `message_stop` arrives), a stream that ends
+                    # early was cut off mid-response.
+                    self.state = 'incomplete'
                     if event.message.container:
                         self.provider_details = self.provider_details or {}
                         self.provider_details['container_id'] = event.message.container.id
@@ -3743,6 +3746,8 @@ class AnthropicStreamedResponse(StreamedResponse):
                     current_block = None
                 elif isinstance(event, BetaRawMessageStopEvent):  # pragma: no branch
                     current_block = None
+                    if self.state == 'incomplete':
+                        self.state = 'complete'
 
     async def close_stream(self) -> None:
         await self._response.source.close()
