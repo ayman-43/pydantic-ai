@@ -122,7 +122,7 @@ class AgentStream(Generic[AgentDepsT, OutputDataT]):
 
         Yields `ModelResponse` snapshots — `state='incomplete'` while streaming is in flight,
         followed by one final `state='complete'` snapshot (or `'interrupted'` if `cancel()` was
-        called). If the underlying response already has accumulated content when this is called,
+        called, or `'incomplete'` if the stream ended before the provider's final event). If the underlying response already has accumulated content when this is called,
         a pre-stream yield surfaces it before iteration begins.
         """
         msg = self.response
@@ -801,7 +801,8 @@ class StreamedRunResult(Generic[AgentDepsT, OutputDataT]):
 
         Each yielded `ModelResponse` is the current state of the response: `response.state` is
         `'incomplete'` while streaming is in flight and `'complete'` (or `'interrupted'` if
-        [`cancel()`][pydantic_ai.result.StreamedRunResult.cancel] was called) on the final yield.
+        [`cancel()`][pydantic_ai.result.StreamedRunResult.cancel] was called) on the final yield. A stream
+        that ended before the provider's final event stays `'incomplete'` on the final yield too.
 
         Args:
             debounce_by: by how much (if at all) to debounce/group the response chunks by. `None` means no debouncing.
