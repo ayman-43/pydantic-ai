@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import UTC
 
+import anyio
 import pydantic_core
 import pytest
 from pydantic import BaseModel
@@ -713,3 +714,37 @@ async def test_return_empty():
     with pytest.raises(ValueError, match='Stream function must return at least one item'):
         async with agent.run_stream(''):
             pass
+
+
+async def test_stream_source_closed_when_cancelled_before_first_item():
+    started = anyio.Event()
+    closed = False
+
+    class Source:
+        def __aiter__(self) -> AsyncIterator[str]:
+            return self
+
+        async def __anext__(self) -> str:
+            started.set()
+            await anyio.sleep_forever()
+            raise AssertionError('unreachable')  # pragma: no cover
+
+        async def aclose(self) -> None:
+            nonlocal closed
+            closed = True
+
+    agent = Agent(FunctionModel(stream_function=lambda _messages, _info: Source()))
+    scope = anyio.CancelScope()
+
+    async def cancel_during_first_pull() -> None:
+        await started.wait()
+        scope.cancel()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(cancel_during_first_pull)
+        with scope:
+            async with agent.run_stream('hello'):
+                raise AssertionError('unreachable')  # pragma: no cover
+
+    assert scope.cancelled_caught
+    assert closed
