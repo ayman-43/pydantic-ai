@@ -1534,6 +1534,8 @@ class GeminiStreamedResponse(StreamedResponse):
     async def _get_event_iterator(self) -> AsyncIterator[ModelResponseStreamEvent]:  # noqa: C901
         if self._provider_timestamp is not None:
             self.provider_details = {'timestamp': self._provider_timestamp}
+        # Until a chunk reports a finish reason (or a blocked prompt), a stream that ends early was cut off mid-response.
+        self.state = 'incomplete'
         grounding_metadata: GroundingMetadata | None = None
         # google-genai streams a long decode's continuation requests as one stream, each request's chunks under its own
         # `response_id`. The first text or thinking of a new request starts a new part, as in the unary response, which
@@ -1591,6 +1593,7 @@ class GeminiStreamedResponse(StreamedResponse):
                                 r.model_dump(by_alias=True) for r in chunk.prompt_feedback.safety_ratings
                             ]
                         self.finish_reason = 'content_filter'
+                        self.state = 'complete'
                         if chunk.response_id:  # pragma: no branch
                             self.provider_response_id = chunk.response_id
                     continue
@@ -1613,6 +1616,8 @@ class GeminiStreamedResponse(StreamedResponse):
                     uncheckpointed_output = True
 
                 raw_finish_reason = candidate.finish_reason
+                if raw_finish_reason:
+                    self.state = 'complete'
                 if raw_finish_reason and not self._has_content_filter:
                     self.provider_details = {
                         **(self.provider_details or {}),

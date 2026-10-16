@@ -4413,6 +4413,40 @@ async def test_google_stream_usage_retains_dropped_field_mid_stream(
 
 
 @pytest.mark.parametrize(
+    'finish_reason,expected_state',
+    [
+        pytest.param(None, 'incomplete', id='cut-off'),
+        pytest.param(GoogleFinishReason.STOP, 'complete', id='finished'),
+    ],
+)
+async def test_google_stream_state_without_finish_reason(
+    allow_model_requests: None,
+    google_provider: GoogleProvider,
+    mocker: MockerFixture,
+    finish_reason: GoogleFinishReason | None,
+    expected_state: str,
+):
+    """A stream that ends before any chunk reports a finish reason is `'incomplete'`, not `'complete'`."""
+    chunk = GenerateContentResponse.model_validate(
+        {
+            'response_id': 'resp-1',
+            'model_version': 'gemini-test',
+            'candidates': [
+                {'content': {'role': 'model', 'parts': [{'text': 'Hello, th'}]}, 'finish_reason': finish_reason}
+            ],
+        }
+    )
+    model = GoogleModel('gemini-2.5-flash', provider=google_provider)
+    mocker.patch.object(model.client.aio.models, 'generate_content_stream', return_value=_aiter_chunks([chunk]))
+    agent = Agent(model=model)
+
+    async with agent.run_stream('Say hello.') as result:
+        assert await result.get_output() == 'Hello, th'
+
+    assert result.response.state == expected_state
+
+
+@pytest.mark.parametrize(
     'model_name,grounding_chunks,expected_web_searches',
     [
         pytest.param('gemini-3-flash-preview', [], 2, id='gemini-3-per-unique-query'),
